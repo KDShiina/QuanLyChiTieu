@@ -1,77 +1,221 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
+import { Alert, BackHandler, Platform, View, ActivityIndicator } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import HomeScreen from './src/screens/HomeScreen';
-import AddExpenseScreen from './src/screens/AddExpenseScreen';
-import StatisticsScreen from './src/screens/StatisticsScreen';
-import ProfileScreen from './src/screens/ProfileScreen';
+import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
-import { Text } from 'react-native';
+import { onAuthStateChanged } from 'firebase/auth';
+import { StatusBar } from 'expo-status-bar';
 
-// Tạo đối tượng Tab Navigator
-const Tab = createBottomTabNavigator();
+// Theme và utilities
+import { COLORS, SHADOWS } from './src/constants/theme';
 
-// Component chính
+// Firebase auth
+import { auth } from './src/config/firebaseConfig';
+
+// Import Navigators
+import AuthNavigator from './src/navigation/AuthNavigator';
+import MainTabNavigator from './src/navigation/MainTabNavigator';
+import ToolStackNavigator from './src/navigation/ToolStackNavigator';
+
+// Import Individual Screens
+import SelectLocationScreen from './src/screens/SelectLocationScreen';
+import AddExpenseScreen from './src/screens/AddExpenseScreen';
+import ExpenseViewDetailScreen from './src/screens/ExpenseDetailViewScreen';
+import EditExpenseScreen from './src/screens/EditExpenseScreen';
+import EditProfileScreen from './src/screens/EditProfileScreen';
+
+// TypeScript Types
+export type AuthStackParamList = {
+  Login: undefined;
+  Register: undefined;
+  ForgotPassword: undefined;
+};
+
+export type MainTabParamList = {
+  Home: undefined;
+  History: undefined;
+  Add: undefined;
+  Tools: undefined;
+  Profile: undefined;
+};
+
+export type ModalStackParamList = {
+  SelectLocation: undefined;
+  AddExpenseScreen: { categoryId: string; type: string };
+  ExpenseViewDetailScreen: { id: string };
+  EditExpenseScreen: { id: string };
+  EditProfile: undefined;
+};
+
+export type ToolStackParamList = {
+  GoalScreen: undefined;
+  SuggestionScreen: undefined;
+  RecurringScreen: undefined;
+  WalletScreen: undefined;
+};
+
+export type RootStackParamList = {
+  Auth: undefined;
+  Main: undefined;
+} & ModalStackParamList & ToolStackParamList;
+
+const Stack = createNativeStackNavigator<RootStackParamList>();
+
 const App = () => {
+  const [user, setUser] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+
+  // Kiểm tra trạng thái đăng nhập
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      setUser(currentUser);
+      setLoading(false);
+    });
+    return unsubscribe;
+  }, []);
+
+  // Xử lý nút Back trên Android
+  useEffect(() => {
+    if (Platform.OS === 'android') {
+      const backAction = () => {
+        Alert.alert(
+          'Thoát ứng dụng', 
+          'Bạn có chắc chắn muốn thoát?', 
+          [
+            { 
+              text: 'Hủy', 
+              onPress: () => null, 
+              style: 'cancel' 
+            },
+            { 
+              text: 'Thoát', 
+              onPress: () => BackHandler.exitApp(),
+              style: 'destructive'
+            },
+          ],
+          { cancelable: true }
+        );
+        return true;
+      };
+
+      const backHandler = BackHandler.addEventListener('hardwareBackPress', backAction);
+      return () => backHandler.remove();
+    }
+  }, []);
+
+  // Loading Screen
+  if (loading) {
+    return (
+      <View style={{ 
+        flex: 1, 
+        justifyContent: 'center', 
+        alignItems: 'center', 
+        backgroundColor: COLORS.background 
+      }}>
+        <ActivityIndicator size="large" color={COLORS.primary} />
+      </View>
+    );
+  }
+
   return (
-    <NavigationContainer>
-      <Tab.Navigator
-        initialRouteName="Home"
-        screenOptions={{
-          headerShown: false,
-          tabBarStyle: {
-            backgroundColor: '#f1f5f9',
-            paddingBottom: 10,
-            height: 60, // Chỉnh độ cao Tab
-            borderTopWidth: 0, // Xóa đường viền trên Tab
-            shadowColor: '#000', // Thêm bóng đổ
-            shadowOffset: { width: 0, height: -3 },
-            shadowOpacity: 0.1,
-            shadowRadius: 3,
-          },
-          tabBarLabelStyle: {
-            fontSize: 12, // Chỉnh font size cho Label
-            fontWeight: 'bold',
-          },
-          tabBarIconStyle: {
-            paddingBottom: 5, // Giảm khoảng cách giữa icon và label
-          },
-        }}
-      >
-        <Tab.Screen
-          name="Home"
-          component={HomeScreen}
-          options={{
-            tabBarIcon: ({ color, size }) => <Ionicons name="home" size={size} color={color} />,
-            tabBarLabel: () => <Text style={{ color: '#1a202c' }}>Trang chủ</Text>,
+    <>
+      <StatusBar style="auto" />
+      <NavigationContainer>
+        <Stack.Navigator 
+          screenOptions={{ 
+            headerShown: false,
+            animation: 'slide_from_right',
           }}
-        />
-        <Tab.Screen
-          name="Add"
-          component={AddExpenseScreen}
-          options={{
-            tabBarIcon: ({ color, size }) => <Ionicons name="add-circle" size={size} color={color} />,
-            tabBarLabel: () => <Text style={{ color: '#1a202c' }}>Thêm</Text>,
-          }}
-        />
-        <Tab.Screen
-          name="Stats"
-          component={StatisticsScreen}
-          options={{
-            tabBarIcon: ({ color, size }) => <Ionicons name="stats-chart" size={size} color={color} />,
-            tabBarLabel: () => <Text style={{ color: '#1a202c' }}>Thống kê</Text>,
-          }}
-        />
-        <Tab.Screen
-          name="Profile"
-          component={ProfileScreen}
-          options={{
-            tabBarIcon: ({ color, size }) => <Ionicons name="person" size={size} color={color} />,
-            tabBarLabel: () => <Text style={{ color: '#1a202c' }}>Hồ sơ</Text>,
-          }}
-        />
-      </Tab.Navigator>
-    </NavigationContainer>
+        >
+          {user ? (
+            <>
+              {/* Main App Flow */}
+              <Stack.Screen 
+                name="Main" 
+                component={MainTabNavigator} 
+              />
+              
+              {/* Modal Screens - Individual Components */}
+              <Stack.Group 
+                screenOptions={{ 
+                  presentation: 'modal',
+                  animation: 'slide_from_bottom',
+                }}
+              >
+                <Stack.Screen 
+                  name="SelectLocation" 
+                  component={SelectLocationScreen}
+                  options={{
+                    title: 'Chọn vị trí'
+                  }}
+                />
+                <Stack.Screen 
+                  name="AddExpenseScreen" 
+                  component={AddExpenseScreen}
+                  options={{
+                    title: 'Thêm giao dịch'
+                  }}
+                />
+                <Stack.Screen 
+                  name="ExpenseViewDetailScreen" 
+                  component={ExpenseViewDetailScreen}
+                  options={{
+                    title: 'Chi tiết giao dịch'
+                  }}
+                />
+                <Stack.Screen 
+                  name="EditExpenseScreen" 
+                  component={EditExpenseScreen}
+                  options={{
+                    title: 'Chỉnh sửa giao dịch'
+                  }}
+                />
+                <Stack.Screen 
+                  name="EditProfile" 
+                  component={EditProfileScreen}
+                  options={{
+                    title: 'Chỉnh sửa hồ sơ'
+                  }}
+                />
+              </Stack.Group>
+
+              {/* Tool Screens */}
+              <Stack.Group
+                screenOptions={{
+                  animation: 'slide_from_right',
+                }}
+              >
+                <Stack.Screen 
+                  name="GoalScreen" 
+                  component={ToolStackNavigator} 
+                />
+                <Stack.Screen 
+                  name="SuggestionScreen" 
+                  component={ToolStackNavigator} 
+                />
+                <Stack.Screen 
+                  name="RecurringScreen" 
+                  component={ToolStackNavigator} 
+                />
+                <Stack.Screen 
+                  name="WalletScreen" 
+                  component={ToolStackNavigator} 
+                />
+              </Stack.Group>
+            </>
+          ) : (
+            <>
+              {/* Authentication Flow */}
+              <Stack.Screen 
+                name="Auth" 
+                component={AuthNavigator} 
+              />
+            </>
+          )}
+        </Stack.Navigator>
+      </NavigationContainer>
+    </>
   );
 };
 
