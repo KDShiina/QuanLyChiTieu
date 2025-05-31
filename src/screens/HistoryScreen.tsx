@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
 import {
   View,
   Text,
@@ -15,23 +15,82 @@ import { auth, db } from '../config/firebaseConfig';
 import { Calendar } from 'react-native-calendars';
 import { Ionicons } from '@expo/vector-icons';
 import HistoryHeader from '../components/Header';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const { width } = Dimensions.get('window');
 
 const HistoryScreen = ({ navigation }) => {
   const [expenses, setExpenses] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [selectedDate, setSelectedDate] = useState(null);
-  const [dailyExpenses, setDailyExpenses] = useState([]);
+  const [selectedDates, setSelectedDates] = useState([]);
+  const [filteredExpenses, setFilteredExpenses] = useState([]);
   const [markedDates, setMarkedDates] = useState({});
   const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth());
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
   const [showCalendar, setShowCalendar] = useState(false);
+  const [isMultiSelectMode, setIsMultiSelectMode] = useState(false);
   
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const translateY = useRef(new Animated.Value(50)).current;
   const calendarOpacity = useRef(new Animated.Value(0)).current;
   const calendarScale = useRef(new Animated.Value(0.95)).current;
+
+  // Helper function to get the display date (prioritize updatedAt, then createdAt, then date)
+  const getDisplayDate = (data) => {
+    // Priority: updatedAt > createdAt > date
+    const dateFields = [data.updatedAt, data.createdAt, data.date];
+    
+    for (const field of dateFields) {
+      if (field) {
+        if (field instanceof Timestamp) {
+          return field.toDate();
+        } else if (typeof field === 'string') {
+          const parsed = new Date(field);
+          if (!isNaN(parsed.getTime())) return parsed;
+        } else if (field instanceof Date) {
+          return field;
+        }
+      }
+    }
+    
+    return null; // No valid date found
+  };
+
+  // Load saved selected dates khi component mount
+  useEffect(() => {
+    loadSavedSelectedDates();
+  }, []);
+
+  const loadSavedSelectedDates = async () => {
+    try {
+      const savedDates = await AsyncStorage.getItem('selectedDates');
+      if (savedDates) {
+        const parsedDates = JSON.parse(savedDates);
+        setSelectedDates(parsedDates);
+        if (parsedDates.length === 0) {
+          // Nếu không có ngày nào được lưu, mặc định chọn hôm nay
+          const today = new Date().toISOString().split('T')[0];
+          setSelectedDates([today]);
+        }
+      } else {
+        // Lần đầu tiên, chọn hôm nay
+        const today = new Date().toISOString().split('T')[0];
+        setSelectedDates([today]);
+      }
+    } catch (error) {
+      console.error('Error loading saved dates:', error);
+      const today = new Date().toISOString().split('T')[0];
+      setSelectedDates([today]);
+    }
+  };
+
+  const saveSelectedDates = async (dates) => {
+    try {
+      await AsyncStorage.setItem('selectedDates', JSON.stringify(dates));
+    } catch (error) {
+      console.error('Error saving selected dates:', error);
+    }
+  };
 
   useEffect(() => {
     const user = auth.currentUser;
@@ -43,14 +102,9 @@ const HistoryScreen = ({ navigation }) => {
 
       snapshot.forEach((doc) => {
         const data = doc.data();
-        let timestamp = null;
-
-        if (data.date instanceof Timestamp) {
-          timestamp = data.date.toDate();
-        } else if (typeof data.date === 'string') {
-          const parsed = new Date(data.date);
-          if (!isNaN(parsed.getTime())) timestamp = parsed;
-        }
+        
+        // Get the display date using the new logic
+        const displayDate = getDisplayDate(data);
 
         fetchedExpenses.push({
           id: doc.id,
@@ -61,56 +115,64 @@ const HistoryScreen = ({ navigation }) => {
           categoryColor: data.categoryColor ?? '#22c55e',
           type: data.type ?? 'expense',
           userId: data.userId,
-          timestamp,
-          note: data.note ?? ''
+          timestamp: displayDate, // This will be used for sorting and filtering
+          note: data.note ?? '',
+          createdAt: data.createdAt,
+          updatedAt: data.updatedAt,
+          // Store raw data for debugging if needed
+          rawData: {
+            createdAt: data.createdAt,
+            updatedAt: data.updatedAt,
+            date: data.date
+          }
         });
       });
 
+      // Sort by timestamp (which now uses updatedAt > createdAt > date priority)
       fetchedExpenses.sort((a, b) => {
         const timeA = a.timestamp ? a.timestamp.getTime() : 0;
         const timeB = b.timestamp ? b.timestamp.getTime() : 0;
-        return timeB - timeA;
+        return timeB - timeA; // Newest first
       });
 
       setExpenses(fetchedExpenses);
       generateMarkedDates(fetchedExpenses);
       setLoading(false);
       
-      Animated.parallel([
-        Animated.timing(fadeAnim, {
-          toValue: 1,
-          duration: 800,
-          useNativeDriver: true,
-        }),
-        Animated.timing(translateY, {
-          toValue: 0,
-          duration: 600,
-          useNativeDriver: true,
-        })
-      ]).start();
+      // Delay animations to avoid insertion effect issues
+      requestAnimationFrame(() => {
+        Animated.parallel([
+          Animated.timing(fadeAnim, {
+            toValue: 1,
+            duration: 800,
+            useNativeDriver: true,
+          }),
+          Animated.timing(translateY, {
+            toValue: 0,
+            duration: 600,
+            useNativeDriver: true,
+          })
+        ]).start();
+      });
     });
 
     return () => unsubscribe();
   }, []);
 
   useEffect(() => {
-    if (!selectedDate && expenses.length > 0) {
-      const today = new Date().toISOString().split('T')[0];
-      setSelectedDate(today);
-    }
-  }, [expenses]);
-
-  useEffect(() => {
-    if (selectedDate) {
+    if (selectedDates.length > 0) {
       const filtered = expenses.filter((exp) => {
         const dateStr = exp.timestamp?.toISOString().split('T')[0];
-        return dateStr === selectedDate;
+        return selectedDates.includes(dateStr);
       });
-      setDailyExpenses(filtered);
+      setFilteredExpenses(filtered);
+      
+      // Save selected dates whenever they change
+      saveSelectedDates(selectedDates);
     }
-  }, [selectedDate, expenses]);
+  }, [selectedDates, expenses]);
 
-  const generateMarkedDates = (expensesList) => {
+  const generateMarkedDates = useCallback((expensesList) => {
     const marked = {};
     
     expensesList.forEach(expense => {
@@ -135,45 +197,48 @@ const HistoryScreen = ({ navigation }) => {
       }
     });
     
-    if (selectedDate) {
-      if (!marked[selectedDate]) {
-        marked[selectedDate] = {};
+    // Mark selected dates
+    selectedDates.forEach(dateStr => {
+      if (!marked[dateStr]) {
+        marked[dateStr] = {};
       }
-      marked[selectedDate] = {
-        ...marked[selectedDate],
+      marked[dateStr] = {
+        ...marked[dateStr],
         selected: true,
-        selectedColor: '#4CAF50',
+        selectedColor: isMultiSelectMode ? '#3b82f6' : '#4CAF50',
       };
-    }
+    });
     
     setMarkedDates(marked);
-  };
+  }, [selectedDates, isMultiSelectMode]);
+
+  useEffect(() => {
+    generateMarkedDates(expenses);
+  }, [generateMarkedDates, expenses]);
 
   const handleDayPress = (day) => {
-    setSelectedDate(day.dateString);
-    
-    const newMarkedDates = { ...markedDates };
-    
-    if (selectedDate && newMarkedDates[selectedDate]) {
-      const { selected, selectedColor, ...rest } = newMarkedDates[selectedDate];
-      newMarkedDates[selectedDate] = rest;
+    if (isMultiSelectMode) {
+      // Multi-select mode
+      const dateString = day.dateString;
+      let newSelectedDates;
+      
+      if (selectedDates.includes(dateString)) {
+        // Remove date if already selected
+        newSelectedDates = selectedDates.filter(date => date !== dateString);
+      } else {
+        // Add date to selection
+        newSelectedDates = [...selectedDates, dateString].sort();
+      }
+      
+      setSelectedDates(newSelectedDates);
+    } else {
+      // Single select mode
+      setSelectedDates([day.dateString]);
+      
+      setTimeout(() => {
+        toggleCalendar();
+      }, 300);
     }
-    
-    if (!newMarkedDates[day.dateString]) {
-      newMarkedDates[day.dateString] = {};
-    }
-    
-    newMarkedDates[day.dateString] = {
-      ...newMarkedDates[day.dateString],
-      selected: true,
-      selectedColor: '#4CAF50',
-    };
-    
-    setMarkedDates(newMarkedDates);
-    
-    setTimeout(() => {
-      toggleCalendar();
-    }, 300);
   };
 
   const handleMonthChange = (month) => {
@@ -181,23 +246,21 @@ const HistoryScreen = ({ navigation }) => {
     setSelectedYear(month.year);
   };
 
-  const calculateMonthlyTotal = () => {
-    let totalIncome = 0;
-    let totalExpense = 0;
+  // Thay đổi hàm tính toán từ theo tháng sang theo ngày được chọn
+  const calculateSelectedDatesTotal = () => {
+    const totalIncome = filteredExpenses
+      .filter(exp => exp.type === 'income')
+      .reduce((sum, exp) => sum + Math.abs(exp.amount), 0);
+      
+    const totalExpense = filteredExpenses
+      .filter(exp => exp.type === 'expense')
+      .reduce((sum, exp) => sum + Math.abs(exp.amount), 0);
 
-    expenses.forEach((exp) => {
-      const date = exp.timestamp;
-      if (
-        date &&
-        date.getMonth() === selectedMonth &&
-        date.getFullYear() === selectedYear
-      ) {
-        if (exp.type === 'income') totalIncome += Math.abs(exp.amount);
-        else totalExpense += Math.abs(exp.amount);
-      }
-    });
-
-    return { totalIncome, totalExpense, balance: totalIncome - totalExpense };
+    return {
+      totalIncome,
+      totalExpense,
+      balance: totalIncome - totalExpense
+    };
   };
 
   const toggleCalendar = () => {
@@ -218,114 +281,138 @@ const HistoryScreen = ({ navigation }) => {
       });
     } else {
       setShowCalendar(true);
-      Animated.parallel([
-        Animated.timing(calendarOpacity, {
-          toValue: 1,
-          duration: 300,
-          useNativeDriver: true,
-        }),
-        Animated.timing(calendarScale, {
-          toValue: 1,
-          duration: 300,
-          useNativeDriver: true,
-        })
-      ]).start();
+      requestAnimationFrame(() => {
+        Animated.parallel([
+          Animated.timing(calendarOpacity, {
+            toValue: 1,
+            duration: 300,
+            useNativeDriver: true,
+          }),
+          Animated.timing(calendarScale, {
+            toValue: 1,
+            duration: 300,
+            useNativeDriver: true,
+          })
+        ]).start();
+      });
     }
   };
 
-  const [itemAnimations, setItemAnimations] = useState([]);
-  
-  useEffect(() => {
-    const newAnimations = dailyExpenses.map(() => ({
-      scale: new Animated.Value(0.9),
-      opacity: new Animated.Value(0.6)
-    }));
+  const toggleMultiSelectMode = () => {
+    setIsMultiSelectMode(!isMultiSelectMode);
+    if (isMultiSelectMode && selectedDates.length > 1) {
+      // When exiting multi-select mode, keep only the first selected date
+      setSelectedDates([selectedDates[0]]);
+    }
+  };
+
+  const clearAllSelections = () => {
+    setSelectedDates([]);
+  };
+
+  const selectToday = () => {
+    const today = new Date().toISOString().split('T')[0];
+    setSelectedDates([today]);
+    setIsMultiSelectMode(false);
+  };
+
+  // Memoize item animations to prevent re-creation on every render
+  const createItemAnimation = useCallback(() => ({
+    scale: new Animated.Value(0.9),
+    opacity: new Animated.Value(0.6)
+  }), []);
+
+  // Create animations for items only when needed
+  const animateItems = useCallback((itemsLength) => {
+    const animations = [];
     
-    setItemAnimations(newAnimations);
+    for (let i = 0; i < itemsLength; i++) {
+      const anim = createItemAnimation();
+      animations.push(anim);
+      
+      // Start animations with delay
+      setTimeout(() => {
+        Animated.parallel([
+          Animated.spring(anim.scale, {
+            toValue: 1,
+            tension: 100,
+            friction: 8,
+            useNativeDriver: true,
+          }),
+          Animated.timing(anim.opacity, {
+            toValue: 1,
+            duration: 500,
+            useNativeDriver: true,
+          })
+        ]).start();
+      }, i * 50);
+    }
     
-    const animations = newAnimations.flatMap((anim, index) => [
-      Animated.spring(anim.scale, {
-        toValue: 1,
-        tension: 100,
-        friction: 8,
-        delay: index * 100,
-        useNativeDriver: true,
-      }),
-      Animated.timing(anim.opacity, {
-        toValue: 1,
-        duration: 500,
-        delay: index * 100,
-        useNativeDriver: true,
-      })
-    ]);
-    
-    Animated.parallel(animations).start();
-  }, [dailyExpenses]);
+    return animations;
+  }, [createItemAnimation]);
   
   const renderItem = ({ item, index }) => {
-    const animation = itemAnimations[index] || { scale: new Animated.Value(1), opacity: new Animated.Value(1) };
-    
+    // Simple static rendering without per-item animations to avoid insertion effect issues
     return (
-      <Animated.View style={[
-        { transform: [{ scale: animation.scale }] },
-        { opacity: animation.opacity }
-      ]}>
-        <TouchableOpacity
-          style={[styles.item, {
-            borderLeftWidth: 5,
-            borderLeftColor: item.categoryColor || (item.type === 'income' ? '#10b981' : '#ef4444')
-          }]}
-          onPress={() =>
-            navigation.navigate('ExpenseViewDetailScreen', { expenseId: item.id })
-          }
-          activeOpacity={0.7}
-        >
-          <View style={styles.itemRow}>
-            <View style={[styles.iconContainer, {
-              backgroundColor: hexToRgba(item.categoryColor || (item.type === 'income' ? '#10b981' : '#ef4444'), 0.15)
-            }]}>
-              <Ionicons 
-                name={getIconName(item.category, item.type)} 
-                size={24} 
-                color={item.categoryColor || (item.type === 'income' ? '#10b981' : '#ef4444')} 
-              />
+      <TouchableOpacity
+        style={[styles.item, {
+          borderLeftWidth: 5,
+          borderLeftColor: item.categoryColor || (item.type === 'income' ? '#10b981' : '#ef4444')
+        }]}
+        onPress={() =>
+          navigation.navigate('ExpenseViewDetailScreen', { expenseId: item.id })
+        }
+        activeOpacity={0.7}
+      >
+        <View style={styles.itemRow}>
+          <View style={[styles.iconContainer, {
+            backgroundColor: hexToRgba(item.categoryColor || (item.type === 'income' ? '#10b981' : '#ef4444'), 0.15)
+          }]}>
+            <Ionicons 
+              name={getIconName(item.category, item.type)} 
+              size={24} 
+              color={item.categoryColor || (item.type === 'income' ? '#10b981' : '#ef4444')} 
+            />
+          </View>
+          <View style={styles.itemContent}>
+            <View style={styles.itemHeader}>
+              <Text style={styles.reason} numberOfLines={1}>
+                {item.reason}
+              </Text>
+              <Text
+                style={[
+                  styles.amount,
+                  { color: item.type === 'income' ? '#10b981' : '#ef4444' },
+                ]}
+              >
+                {item.type === 'income' ? '+' : '-'}
+                {Math.abs(item.amount).toLocaleString()} đ
+              </Text>
             </View>
-            <View style={styles.itemContent}>
-              <View style={styles.itemHeader}>
-                <Text style={styles.reason} numberOfLines={1}>
-                  {item.reason}
-                </Text>
-                <Text
-                  style={[
-                    styles.amount,
-                    { color: item.type === 'income' ? '#10b981' : '#ef4444' },
-                  ]}
-                >
-                  {item.type === 'income' ? '+' : '-'}
-                  {Math.abs(item.amount).toLocaleString()} đ
+            <View style={styles.itemFooter}>
+              <View style={styles.categoryContainer}>
+                <Text style={styles.category}>
+                  {typeof item.category === 'string' ? item.category : 'Không rõ danh mục'}
                 </Text>
               </View>
-              <View style={styles.itemFooter}>
-                <View style={styles.categoryContainer}>
-                  <Text style={styles.category}>
-                    {typeof item.category === 'string' ? item.category : 'Không rõ danh mục'}
-                  </Text>
-                </View>
-                {item.note ? (
-                  <Text style={styles.note} numberOfLines={1}>
-                    {item.note}
-                  </Text>
-                ) : null}
-                {item.timestamp ? (
-                  <Text style={styles.time}>
-                    {formatTime(item.timestamp)}
-                  </Text>
-                ) : null}
-              </View>
+              {item.note ? (
+                <Text style={styles.note} numberOfLines={1}>
+                  {item.note}
+                </Text>
+              ) : null}
+              {item.timestamp ? (
+                <Text style={styles.time}>
+                  {formatTime(item.timestamp)} - {formatShortDate(item.timestamp)}
+                  {/* Optional: Show if this was updated */}
+                  {item.updatedAt && item.createdAt && item.updatedAt !== item.createdAt && (
+                    <Text style={styles.updatedIndicator}></Text>
+                  )}
+                </Text>
+              ) : null}
             </View>
           </View>
-        </TouchableOpacity>
-      </Animated.View>
+        </View>
+      </TouchableOpacity>
     );
   };
 
@@ -350,6 +437,7 @@ const HistoryScreen = ({ navigation }) => {
       'Giáo dục': 'school',
       'Tiết kiệm': 'wallet',
       'Quà tặng': 'gift',
+      'Thú cưng': 'paw', // Added for your sample data
     };
     
     return categoryMap[category] || 'cash';
@@ -357,6 +445,10 @@ const HistoryScreen = ({ navigation }) => {
 
   const formatTime = (date) => {
     return `${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}`;
+  };
+
+  const formatShortDate = (date) => {
+    return `${date.getDate().toString().padStart(2, '0')}/${(date.getMonth() + 1).toString().padStart(2, '0')}`;
   };
 
   const formatDate = (dateString) => {
@@ -369,6 +461,17 @@ const HistoryScreen = ({ navigation }) => {
     return new Date(dateString).toLocaleDateString('vi-VN', options);
   };
 
+  const formatSelectedDatesText = () => {
+    if (selectedDates.length === 0) return "Chưa chọn ngày nào";
+    if (selectedDates.length === 1) return formatDate(selectedDates[0]);
+    
+    const sortedDates = [...selectedDates].sort();
+    const firstDate = new Date(sortedDates[0]);
+    const lastDate = new Date(sortedDates[sortedDates.length - 1]);
+    
+    return `${selectedDates.length} ngày được chọn (${firstDate.getDate()}/${firstDate.getMonth() + 1} - ${lastDate.getDate()}/${lastDate.getMonth() + 1})`;
+  };
+
   if (loading) {
     return (
       <View style={styles.center}>
@@ -378,18 +481,21 @@ const HistoryScreen = ({ navigation }) => {
     );
   }
 
-  const { totalIncome, totalExpense, balance } = calculateMonthlyTotal();
+  // Sử dụng hàm tính toán mới
+  const { totalIncome, totalExpense, balance } = calculateSelectedDatesTotal();
 
   return (
     <View style={styles.container}>
       <StatusBar barStyle="dark-content" backgroundColor="#f8f9fa" />
       
-      {/* Sử dụng HistoryHeader component */}
+      {/* Sử dụng HistoryHeader component với props được cập nhật */}
       <HistoryHeader
         fadeAnim={fadeAnim}
         translateY={translateY}
         selectedMonth={selectedMonth}
         selectedYear={selectedYear}
+        selectedDates={selectedDates}
+        isMultiSelectMode={isMultiSelectMode}
         balance={balance}
         totalIncome={totalIncome}
         totalExpense={totalExpense}
@@ -400,6 +506,41 @@ const HistoryScreen = ({ navigation }) => {
       <FlatList
         ListHeaderComponent={
           <View style={styles.listHeaderContainer}>
+            {/* Multi-select controls */}
+            <View style={styles.controlsContainer}>
+              <TouchableOpacity
+                style={[styles.controlButton, isMultiSelectMode && styles.activeControlButton]}
+                onPress={toggleMultiSelectMode}
+              >
+                <Ionicons 
+                  name={isMultiSelectMode ? "checkmark-done" : "albums-outline"} 
+                  size={16} 
+                  color={isMultiSelectMode ? "#fff" : "#065f46"} 
+                />
+                <Text style={[styles.controlButtonText, isMultiSelectMode && styles.activeControlButtonText]}>
+                  {isMultiSelectMode ? "Chọn nhiều" : "Chọn đơn"}
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.controlButton}
+                onPress={selectToday}
+              >
+                <Ionicons name="today-outline" size={16} color="#065f46" />
+                <Text style={styles.controlButtonText}>Hôm nay</Text>
+              </TouchableOpacity>
+
+              {selectedDates.length > 0 && (
+                <TouchableOpacity
+                  style={[styles.controlButton, styles.clearButton]}
+                  onPress={clearAllSelections}
+                >
+                  <Ionicons name="close-circle-outline" size={16} color="#ef4444" />
+                  <Text style={[styles.controlButtonText, { color: '#ef4444' }]}>Xóa</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+
             {/* Animated Calendar */}
             {showCalendar && (
               <Animated.View style={[
@@ -409,6 +550,11 @@ const HistoryScreen = ({ navigation }) => {
                   transform: [{ scale: calendarScale }]
                 }
               ]}>
+                <View style={styles.calendarHeader}>
+                  <Text style={styles.calendarHeaderText}>
+                    {isMultiSelectMode ? "Chọn nhiều ngày (nhấn để thêm/bỏ)" : "Chọn một ngày"}
+                  </Text>
+                </View>
                 <Calendar
                   onDayPress={handleDayPress}
                   onMonthChange={handleMonthChange}
@@ -417,7 +563,7 @@ const HistoryScreen = ({ navigation }) => {
                   theme={{
                     calendarBackground: '#fff',
                     textSectionTitleColor: '#065f46',
-                    selectedDayBackgroundColor: '#4CAF50',
+                    selectedDayBackgroundColor: isMultiSelectMode ? '#3b82f6' : '#4CAF50',
                     selectedDayTextColor: '#ffffff',
                     todayTextColor: '#4CAF50',
                     dayTextColor: '#333',
@@ -443,7 +589,7 @@ const HistoryScreen = ({ navigation }) => {
               >
                 <Ionicons name="calendar-outline" size={20} color="#065f46" style={styles.dateBadgeIcon} />
                 <Text style={styles.dateBadgeText}>
-                  {selectedDate ? formatDate(selectedDate) : "Hãy chọn ngày"}
+                  {formatSelectedDatesText()}
                 </Text>
                 <Ionicons 
                   name={showCalendar ? "chevron-up" : "chevron-down"} 
@@ -454,16 +600,18 @@ const HistoryScreen = ({ navigation }) => {
             </View>
 
             <View style={styles.transactionsHeader}>
-              <Text style={styles.recentTransactionsText}>Giao dịch trong ngày</Text>
+              <Text style={styles.recentTransactionsText}>
+                {selectedDates.length > 1 ? "Giao dịch các ngày đã chọn" : "Giao dịch trong ngày"}
+              </Text>
               <View style={styles.transactionCount}>
                 <Text style={styles.transactionCountText}>
-                  {dailyExpenses.length} giao dịch
+                  {filteredExpenses.length} giao dịch
                 </Text>
               </View>
             </View>
           </View>
         }
-        data={dailyExpenses}
+        data={filteredExpenses}
         keyExtractor={(item) => item.id}
         renderItem={renderItem}
         contentContainerStyle={styles.listContent}
@@ -473,7 +621,10 @@ const HistoryScreen = ({ navigation }) => {
               <Ionicons name="receipt-outline" size={60} color="#cbd5e1" />
             </View>
             <Text style={styles.emptyText}>
-              Không có giao dịch trong ngày
+              {selectedDates.length > 1 
+                ? "Không có giao dịch trong các ngày đã chọn"
+                : "Không có giao dịch trong ngày"
+              }
             </Text>
           </View>
         }
@@ -492,6 +643,34 @@ const styles = StyleSheet.create({
     paddingBottom: 8,
     paddingTop: 16,
   },
+  controlsContainer: {
+    flexDirection: 'row',
+    marginBottom: 16,
+    gap: 8,
+  },
+  controlButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#e2f8ea',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 16,
+    gap: 4,
+  },
+  activeControlButton: {
+    backgroundColor: '#065f46',
+  },
+  controlButtonText: {
+    color: '#065f46',
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  activeControlButtonText: {
+    color: '#fff',
+  },
+  clearButton: {
+    backgroundColor: '#fee2e2',
+  },
   calendarContainer: {
     backgroundColor: '#fff',
     padding: 16,
@@ -502,6 +681,18 @@ const styles = StyleSheet.create({
     shadowRadius: 10,
     shadowOffset: { width: 0, height: 4 },
     elevation: 4,
+  },
+  calendarHeader: {
+    alignItems: 'center',
+    marginBottom: 12,
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f1f5f9',
+  },
+  calendarHeaderText: {
+    color: '#64748b',
+    fontSize: 14,
+    fontWeight: '500',
   },
   dateSection: {
     alignItems: 'center',
@@ -519,6 +710,7 @@ const styles = StyleSheet.create({
     shadowRadius: 5,
     shadowOffset: { width: 0, height: 2 },
     elevation: 2,
+    maxWidth: width - 32,
   },
   dateBadgeIcon: {
     marginRight: 6,
@@ -528,6 +720,8 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '500',
     marginRight: 6,
+    flex: 1,
+    textAlign: 'center',
   },
   transactionsHeader: {
     flexDirection: 'row',
@@ -619,6 +813,11 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#94a3b8',
     marginLeft: 4,
+  },
+  updatedIndicator: {
+    fontSize: 10,
+    color: '#6366f1',
+    fontStyle: 'italic',
   },
   emptyContainer: {
     alignItems: 'center',

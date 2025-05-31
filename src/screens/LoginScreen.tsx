@@ -180,25 +180,6 @@ const LoginScreen = ({ navigation }: any) => {
             )}
           </TouchableOpacity>
           
-          <View style={styles.divider}>
-            <View style={styles.dividerLine} />
-            <Text style={styles.dividerText}>HOẶC</Text>
-            <View style={styles.dividerLine} />
-          </View>
-          
-          <View style={styles.socialButtonsContainer}>
-            <TouchableOpacity style={[styles.socialButton, styles.googleButton]}>
-              <Ionicons name="logo-google" size={20} color="#DB4437" />
-            </TouchableOpacity>
-            
-            <TouchableOpacity style={[styles.socialButton, styles.facebookButton]}>
-              <Ionicons name="logo-facebook" size={20} color="#4267B2" />
-            </TouchableOpacity>
-            
-            <TouchableOpacity style={[styles.socialButton, styles.appleButton]}>
-              <Ionicons name="logo-apple" size={20} color="#000000" />
-            </TouchableOpacity>
-          </View>
           
           <View style={styles.registerContainer}>
             <Text style={styles.registerText}>Chưa có tài khoản? </Text>

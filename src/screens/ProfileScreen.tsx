@@ -51,13 +51,16 @@ const ProfileScreen = ({ navigation }) => {
     occupation: ''
   });
 
-  // Stats and summary data
+  // Stats and summary data - Cập nhật với các trường mới
   const [expenseStats, setExpenseStats] = useState({
-    totalSpent: 0,
-    totalBudget: 0,
-    thisMonthSpent: 0,
-    totalTransactions: 0,
-    avgDaily: 0
+    totalBudget: 0,         // Ngân sách hàng tháng
+    thisMonthSpent: 0,      // Chi tiêu tháng này
+    thisMonthIncome: 0,     // Thu nhập tháng này
+    totalTransactions: 0,   // Tổng số giao dịch
+    expenseTransactions: 0, // Số giao dịch chi tiêu
+    incomeTransactions: 0,  // Số giao dịch thu nhập
+    avgDaily: 0,            // Trung bình chi tiêu hàng ngày
+    netBalance: 0,          // Số dư ròng (thu nhập - chi tiêu)
   });
 
   // Modal states
@@ -92,7 +95,7 @@ const ProfileScreen = ({ navigation }) => {
     }
   }, [user?.uid]);
 
-  // Fetch expense stats function - Nhận budgetInfo làm tham số
+  // Fetch expense stats function - Đã được sửa để phân biệt income và expense
   const fetchExpenseStats = useCallback(async (budgetInfo = null) => {
     if (!user?.uid) return;
     
@@ -110,28 +113,44 @@ const ProfileScreen = ({ navigation }) => {
       
       const querySnapshot = await getDocs(expensesQuery);
       
-      let total = 0;
-      let monthTotal = 0;
-      let transactionCount = 0;
+      let totalExpenses = 0;
+      let totalIncome = 0;
+      let monthlyExpenses = 0;
+      let monthlyIncome = 0;
+      let expenseTransactionCount = 0;
+      let incomeTransactionCount = 0;
       
       querySnapshot.forEach(doc => {
-        const expense = doc.data();
-        const amount = parseFloat(expense.amount) || 0;
+        const transaction = doc.data();
+        const amount = parseFloat(transaction.amount) || 0;
+        const type = transaction.type || 'expense'; // Mặc định là expense nếu không có type
         
-        // Add to total
-        total += amount;
-        transactionCount++;
+        // Check if transaction is from current month
+        const transactionDate = transaction.date?.toDate() || new Date();
+        const isCurrentMonth = transactionDate >= startOfMonth;
         
-        // Check if expense is from current month
-        const expenseDate = expense.date?.toDate() || new Date();
-        if (expenseDate >= startOfMonth) {
-          monthTotal += amount;
+        if (type === 'expense') {
+          // Tính chi tiêu
+          totalExpenses += amount;
+          expenseTransactionCount++;
+          
+          if (isCurrentMonth) {
+            monthlyExpenses += amount;
+          }
+        } else if (type === 'income') {
+          // Tính thu nhập
+          totalIncome += amount;
+          incomeTransactionCount++;
+          
+          if (isCurrentMonth) {
+            monthlyIncome += amount;
+          }
         }
       });
       
-      // Calculate average daily spending for current month
+      // Calculate average daily spending for current month (chỉ tính chi tiêu)
       const daysInMonth = now.getDate();
-      const avgDaily = daysInMonth > 0 ? monthTotal / daysInMonth : 0;
+      const avgDailyExpense = daysInMonth > 0 ? monthlyExpenses / daysInMonth : 0;
       
       // Use passed budgetInfo or current userInfo
       const monthlyBudget = budgetInfo 
@@ -139,11 +158,17 @@ const ProfileScreen = ({ navigation }) => {
         : parseFloat(userInfo.monthlyBudget) || 0;
       
       const newStats = {
-        totalSpent: total,
+        totalSpent: totalExpenses, // Chỉ tính chi tiêu
+        totalIncome: totalIncome, // Thêm tổng thu nhập
         totalBudget: monthlyBudget,
-        thisMonthSpent: monthTotal,
-        totalTransactions: transactionCount,
-        avgDaily: avgDaily
+        thisMonthSpent: monthlyExpenses, // Chỉ tính chi tiêu tháng này
+        thisMonthIncome: monthlyIncome, // Thêm thu nhập tháng này
+        totalTransactions: expenseTransactionCount + incomeTransactionCount, // Tổng số giao dịch
+        expenseTransactions: expenseTransactionCount, // Số giao dịch chi tiêu
+        incomeTransactions: incomeTransactionCount, // Số giao dịch thu nhập
+        avgDaily: avgDailyExpense, // Trung bình chi tiêu hàng ngày
+        netBalance: totalIncome - totalExpenses, // Số dư ròng
+        monthlyNetBalance: monthlyIncome - monthlyExpenses // Số dư ròng tháng này
       };
       
       setExpenseStats(newStats);
@@ -540,25 +565,27 @@ const ProfileScreen = ({ navigation }) => {
           </View>
         </View>
 
-        {/* Expense Statistics */}
+        {/* Expense Statistics - Cập nhật với thông tin đầy đủ hơn */}
         <View style={styles.statsContainer}>
-          <Text style={styles.sectionTitle}>Thống kê chi tiêu</Text>
-          
+          <Text style={styles.sectionTitle}>Thống kê tài chính</Text>
+
+          {/* Thống kê tháng hiện tại */}
           <View style={styles.statsGrid}>
             <StatItem
-              icon="wallet-outline"
-              label="Tổng chi tiêu"
-              value={formatCurrency(expenseStats.totalSpent)}
+              icon="card-outline"
+              label="Chi tiêu tháng này"
+              value={formatCurrency(expenseStats.thisMonthSpent)}
               color="#4c669f"
             />
             <StatItem
-              icon="calendar-outline"
-              label="Chi tiêu tháng này"
-              value={formatCurrency(expenseStats.thisMonthSpent)}
+              icon="cash-outline"
+              label="Thu nhập tháng này"
+              value={formatCurrency(expenseStats.thisMonthIncome)}
               color="#28a745"
             />
           </View>
 
+          {/* Thống kê giao dịch */}
           <View style={styles.statsGrid}>
             <StatItem
               icon="receipt-outline"
@@ -567,10 +594,26 @@ const ProfileScreen = ({ navigation }) => {
               color="#ffc107"
             />
             <StatItem
-              icon="trending-up-outline"
+              icon="trending-down-outline"
               label="Trung bình/ngày"
               value={formatCurrency(expenseStats.avgDaily)}
               color="#17a2b8"
+            />
+          </View>
+
+          {/* Thống kê chi tiết giao dịch */}
+          <View style={styles.statsGrid}>
+            <StatItem
+              icon="remove-circle-outline"
+              label="Giao dịch chi tiêu"
+              value={expenseStats.expenseTransactions.toString()}
+              color="#ff8787"
+            />
+            <StatItem
+              icon="add-circle-outline"
+              label="Giao dịch thu nhập"
+              value={expenseStats.incomeTransactions.toString()}
+              color="#69db7c"
             />
           </View>
         </View>
@@ -599,7 +642,7 @@ const ProfileScreen = ({ navigation }) => {
             <MenuOption 
               icon="help-buoy-outline" 
               label="Trung tâm trợ giúp" 
-              onPress={() => Alert.alert('Liên hệ hỗ trợ', 'Email: support@financemgr.com\nHotline: 1900-123-456')} 
+              onPress={() => Alert.alert('Liên hệ hỗ trợ', 'Email: nhom14@gmail.com\nHotline: 123-4567-890')} 
             />
             <MenuOption 
               icon="chatbubbles-outline" 

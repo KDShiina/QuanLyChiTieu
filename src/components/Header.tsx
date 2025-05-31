@@ -5,220 +5,258 @@ import {
   TouchableOpacity,
   StyleSheet,
   Animated,
+  Dimensions,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
-const Header = ({ 
-  fadeAnim, 
-  translateY, 
-  selectedMonth, 
-  selectedYear, 
-  balance, 
-  totalIncome, 
-  totalExpense, 
-  showCalendar, 
-  onToggleCalendar 
+const { width } = Dimensions.get('window');
+
+interface HistoryHeaderProps {
+  fadeAnim: Animated.Value;
+  translateY: Animated.Value;
+  selectedMonth: number;
+  selectedYear: number;
+  selectedDates: string[];
+  isMultiSelectMode: boolean;
+  balance: number;
+  totalIncome: number;
+  totalExpense: number;
+  showCalendar: boolean;
+  onToggleCalendar: () => void;
+}
+
+const HistoryHeader: React.FC<HistoryHeaderProps> = ({
+  fadeAnim,
+  translateY,
+  selectedMonth,
+  selectedYear,
+  selectedDates,
+  isMultiSelectMode,
+  balance,
+  totalIncome,
+  totalExpense,
+  showCalendar,
+  onToggleCalendar,
 }) => {
-  const getMonthName = (month) => {
-    const monthNames = [
-      'Tháng 1', 'Tháng 2', 'Tháng 3', 'Tháng 4', 'Tháng 5', 'Tháng 6',
-      'Tháng 7', 'Tháng 8', 'Tháng 9', 'Tháng 10', 'Tháng 11', 'Tháng 12'
-    ];
-    return monthNames[month];
+  const monthNames = [
+    'Tháng 1', 'Tháng 2', 'Tháng 3', 'Tháng 4', 'Tháng 5', 'Tháng 6',
+    'Tháng 7', 'Tháng 8', 'Tháng 9', 'Tháng 10', 'Tháng 11', 'Tháng 12'
+  ];
+
+  const formatSelectedDatesText = () => {
+    if (selectedDates.length === 0) return "Chưa chọn ngày nào";
+    if (selectedDates.length === 1) {
+      const date = new Date(selectedDates[0]);
+      return `${date.getDate()}/${date.getMonth() + 1}/${date.getFullYear()}`;
+    }
+    
+    const sortedDates = [...selectedDates].sort();
+    const firstDate = new Date(sortedDates[0]);
+    const lastDate = new Date(sortedDates[sortedDates.length - 1]);
+    
+    return `${selectedDates.length} ngày (${firstDate.getDate()}/${firstDate.getMonth() + 1} - ${lastDate.getDate()}/${lastDate.getMonth() + 1})`;
   };
 
   return (
-    <>
-      {/* Main Header */}
-      <Animated.View 
-        style={[
-          styles.header,
-          { 
-            opacity: fadeAnim,
-            transform: [{ translateY: translateY }]
-          }
-        ]}
-      >
-        <Text style={styles.headerTitle}>Lịch sử chi tiêu</Text>
-      </Animated.View>
-
-      {/* Summary Card Header */}
-      <Animated.View style={[
-        styles.headerContainer, 
-        { 
+    <Animated.View
+      style={[
+        styles.header,
+        {
           opacity: fadeAnim,
-          transform: [{ translateY: translateY }]
-        }
-      ]}>
-        <View style={styles.summaryCard}>
-          <View style={styles.summaryTopRow}>
-            <View>
-              <Text style={styles.monthText}>
-                {getMonthName(selectedMonth)} / {selectedYear}
-              </Text>
-              <Text style={styles.balanceLabel}>Số dư cuối tháng</Text>
+          transform: [{ translateY: translateY }],
+        },
+      ]}
+    >
+      <View style={styles.headerContent}>
+        <View style={styles.titleSection}>
+          <Text style={styles.title}>Lịch sử giao dịch</Text>
+          <TouchableOpacity
+            style={styles.calendarToggle}
+            onPress={onToggleCalendar}
+          >
+            <Text style={styles.periodText}>
+              {isMultiSelectMode ? formatSelectedDatesText() : `${monthNames[selectedMonth]} ${selectedYear}`}
+            </Text>
+            <Ionicons
+              name={showCalendar ? "chevron-up" : "chevron-down"}
+              size={18}
+              color="#065f46"
+            />
+          </TouchableOpacity>
+        </View>
+
+        <View style={styles.summaryContainer}>
+          <View style={styles.summaryRow}>
+            <View style={[styles.summaryItem, styles.incomeItem]}>
+              <View style={styles.summaryIconContainer}>
+                <Ionicons name="trending-up" size={18} color="#10b981" />
+              </View>
+              <View>
+                <Text style={styles.summaryLabel}>Thu nhập</Text>
+                <Text style={[styles.summaryValue, { color: '#10b981' }]}>
+                  +{totalIncome.toLocaleString()} đ
+                </Text>
+              </View>
             </View>
-            <TouchableOpacity 
-              style={styles.calendarButton}
-              onPress={onToggleCalendar}
-            >
-              <Ionicons name="calendar" size={18} color="#065f46" />
-              <Text style={styles.calendarButtonText}>
-                {showCalendar ? "Ẩn lịch" : "Xem lịch"}
-              </Text>
-            </TouchableOpacity>
+
+            <View style={[styles.summaryItem, styles.expenseItem]}>
+              <View style={styles.summaryIconContainer}>
+                <Ionicons name="trending-down" size={18} color="#ef4444" />
+              </View>
+              <View>
+                <Text style={styles.summaryLabel}>Chi tiêu</Text>
+                <Text style={[styles.summaryValue, { color: '#ef4444' }]}>
+                  -{totalExpense.toLocaleString()} đ
+                </Text>
+              </View>
+            </View>
           </View>
-          
-          <Text style={[
-            styles.balanceText,
-            { color: balance >= 0 ? '#10b981' : '#ef4444' }
-          ]}>
-            {balance >= 0 ? '+' : ''}{balance.toLocaleString()} đ
-          </Text>
-          
-          <View style={styles.statsRow}>
-            <View style={styles.statBox}>
-              <View style={styles.statIconContainer}>
-                <Ionicons name="arrow-down-circle" size={20} color="#10b981" />
+
+          <View style={styles.balanceContainer}>
+            <View style={styles.balanceItem}>
+              <View style={styles.balanceIconContainer}>
+                <Ionicons
+                  name={balance >= 0 ? "wallet" : "warning"}
+                  size={20}
+                  color={balance >= 0 ? "#065f46" : "#f59e0b"}
+                />
               </View>
               <View>
-                <Text style={styles.statLabel}>Thu nhập</Text>
-                <Text style={styles.income}>+{totalIncome.toLocaleString()} đ</Text>
-              </View>
-            </View>
-            <View style={styles.statDivider} />
-            <View style={styles.statBox}>
-              <View style={styles.statIconContainer}>
-                <Ionicons name="arrow-up-circle" size={20} color="#ef4444" />
-              </View>
-              <View>
-                <Text style={styles.statLabel}>Chi tiêu</Text>
-                <Text style={styles.expense}>-{totalExpense.toLocaleString()} đ</Text>
+                <Text style={styles.balanceLabel}>Số dư</Text>
+                <Text
+                  style={[
+                    styles.balanceValue,
+                    { color: balance >= 0 ? '#065f46' : '#f59e0b' },
+                  ]}
+                >
+                  {balance >= 0 ? '+' : ''}{balance.toLocaleString()} đ
+                </Text>
               </View>
             </View>
           </View>
         </View>
-      </Animated.View>
-    </>
+      </View>
+    </Animated.View>
   );
 };
 
 const styles = StyleSheet.create({
   header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingVertical: 16,
-    backgroundColor: 'rgba(255, 255, 255, 0.9)',
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(203, 213, 225, 0.3)',
-  },
-  headerTitle: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#065f46',
-  },
-  headerContainer: {
-    paddingHorizontal: 16,
-    paddingBottom: 8,
-    paddingTop: 16,
-  },
-  summaryCard: {
-    padding: 20,
     backgroundColor: '#fff',
-    borderRadius: 20,
-    marginBottom: 20,
+    paddingTop: 60,
+    paddingBottom: 20,
+    paddingHorizontal: 20,
     shadowColor: '#000',
     shadowOpacity: 0.08,
     shadowRadius: 10,
     shadowOffset: { width: 0, height: 4 },
     elevation: 4,
   },
-  summaryTopRow: {
+  headerContent: {
+    width: '100%',
+  },
+  titleSection: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginBottom: 4,
+    alignItems: 'center',
+    marginBottom: 20,
   },
-  monthText: {
-    fontSize: 20,
+  title: {
+    fontSize: 24,
     fontWeight: 'bold',
     color: '#065f46',
-    marginBottom: 4,
+  },
+  calendarToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#e2f8ea',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 16,
+  },
+  periodText: {
+    color: '#065f46',
+    fontSize: 14,
+    fontWeight: '500',
+    marginRight: 4,
+  },
+  summaryContainer: {
+    backgroundColor: '#f8fffe',
+    borderRadius: 16,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#e2f8ea',
+  },
+  summaryRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 16,
+  },
+  summaryItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+    padding: 12,
+    borderRadius: 12,
+    marginHorizontal: 4,
+  },
+  incomeItem: {
+    backgroundColor: '#f0fdf4',
+  },
+  expenseItem: {
+    backgroundColor: '#fef2f2',
+  },
+  summaryIconContainer: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(255, 255, 255, 0.7)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  summaryLabel: {
+    fontSize: 12,
+    color: '#64748b',
+    fontWeight: '500',
+  },
+  summaryValue: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginTop: 2,
+  },
+  balanceContainer: {
+    alignItems: 'center',
+  },
+  balanceItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f0fdf4',
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: 16,
+    borderWidth: 2,
+    borderColor: '#bbf7d0',
+  },
+  balanceIconContainer: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255, 255, 255, 0.8)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
   },
   balanceLabel: {
     fontSize: 14,
     color: '#64748b',
-  },
-  calendarButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#e2f8ea',
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    borderRadius: 16,
-  },
-  calendarButtonText: {
-    color: '#065f46',
-    fontSize: 14,
-    marginLeft: 4,
     fontWeight: '500',
   },
-  balanceText: {
-    fontSize: 30,
+  balanceValue: {
+    fontSize: 20,
     fontWeight: 'bold',
-    marginVertical: 10,
-  },
-  statsRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    backgroundColor: '#f8f9fa',
-    borderRadius: 16,
-    padding: 16,
-    marginTop: 10,
-  },
-  statBox: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  statIconContainer: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#fff',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 12,
-    shadowColor: '#000',
-    shadowOpacity: 0.05,
-    shadowRadius: 5,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 2,
-  },
-  statDivider: {
-    width: 1,
-    height: '80%',
-    backgroundColor: '#cbd5e1',
-    marginHorizontal: 10,
-  },
-  statLabel: {
-    fontSize: 14,
-    color: '#64748b',
-    marginBottom: 2,
-  },
-  income: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#10b981',
-  },
-  expense: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#ef4444',
+    marginTop: 2,
   },
 });
 
-export default Header;
+export default HistoryHeader;

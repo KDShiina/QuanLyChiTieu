@@ -9,7 +9,8 @@ import {
   Alert,
   ActivityIndicator,
   Animated,
-  Dimensions
+  Dimensions,
+  Linking
 } from 'react-native';
 import { 
   doc, 
@@ -77,47 +78,125 @@ const formatDate = (date) => {
   if (!date) return 'Không có thông tin';
   
   try {
-    // Convert Firestore timestamp to Date
-    let dateObj = date;
+    let dateObj = null;
     
+    // Handle different date formats from Firestore
     if (date && typeof date === 'object') {
-      // Handle Firestore timestamp with toDate method
+      // Case 1: Firestore Timestamp with toDate() method
       if (typeof date.toDate === 'function') {
         dateObj = date.toDate();
       } 
-      // Handle server timestamp format (seconds/nanoseconds)
-      else if (date.seconds !== undefined && date.nanoseconds !== undefined) {
-        dateObj = new Date(date.seconds * 1000 + date.nanoseconds / 1000000);
+      // Case 2: Server timestamp format with seconds and nanoseconds
+      else if (date.seconds !== undefined) {
+        // Convert Firestore timestamp to milliseconds
+        const milliseconds = date.seconds * 1000 + (date.nanoseconds || 0) / 1000000;
+        dateObj = new Date(milliseconds);
       }
-      // If it's already a Date object, use it directly
+      // Case 3: Already a Date object
       else if (date instanceof Date) {
         dateObj = date;
       }
-    } else if (typeof date === 'string') {
-      // Parse date string
+      // Case 4: Plain object with _seconds (some Firestore formats)
+      else if (date._seconds !== undefined) {
+        const milliseconds = date._seconds * 1000 + (date._nanoseconds || 0) / 1000000;
+        dateObj = new Date(milliseconds);
+      }
+    } 
+    // Case 5: String format
+    else if (typeof date === 'string') {
+      dateObj = new Date(date);
+    }
+    // Case 6: Number (timestamp in milliseconds)
+    else if (typeof date === 'number') {
       dateObj = new Date(date);
     }
     
-    // Check if date is valid
-    if (!(dateObj instanceof Date) || isNaN(dateObj.getTime())) {
-      console.log('Invalid date object:', date);
+    // Validate the resulting date
+    if (!dateObj || !(dateObj instanceof Date) || isNaN(dateObj.getTime())) {
+      console.warn('Invalid date after conversion:', date);
       return 'Ngày không hợp lệ';
     }
     
-    // Format the date
-    const options: Intl.DateTimeFormatOptions = { 
+    // Format options for Vietnamese locale
+     const options: Intl.DateTimeFormatOptions = { 
       weekday: 'long', 
       year: 'numeric', 
       month: 'long', 
       day: 'numeric',
       hour: '2-digit',
-      minute: '2-digit'
+      minute: '2-digit',
+      hour12: false // Use 24-hour format
     };
     
+    // Format the date in Vietnamese
     return dateObj.toLocaleDateString('vi-VN', options);
+    
   } catch (error) {
-    console.error('Error formatting date:', error);
+    console.error('Error in formatDate:', error, 'Original date:', date);
     return 'Lỗi định dạng ngày';
+  }
+};
+
+// Alternative simple format function (if you prefer shorter format)
+const formatDateSimple = (date) => {
+  if (!date) return 'Không có thông tin';
+  
+  try {
+    let dateObj = null;
+    
+    // Handle Firestore timestamp
+    if (date && typeof date === 'object' && typeof date.toDate === 'function') {
+      dateObj = date.toDate();
+    } else if (date && typeof date === 'object' && date.seconds !== undefined) {
+      dateObj = new Date(date.seconds * 1000 + (date.nanoseconds || 0) / 1000000);
+    } else if (date instanceof Date) {
+      dateObj = date;
+    } else if (typeof date === 'string' || typeof date === 'number') {
+      dateObj = new Date(date);
+    }
+    
+    if (!dateObj || isNaN(dateObj.getTime())) {
+      return 'Ngày không hợp lệ';
+    }
+    
+    // Simple format: DD/MM/YYYY HH:mm
+    const day = String(dateObj.getDate()).padStart(2, '0');
+    const month = String(dateObj.getMonth() + 1).padStart(2, '0');
+    const year = dateObj.getFullYear();
+    const hours = String(dateObj.getHours()).padStart(2, '0');
+    const minutes = String(dateObj.getMinutes()).padStart(2, '0');
+    
+    return `${day}/${month}/${year} ${hours}:${minutes}`;
+    
+  } catch (error) {
+    console.error('Error in formatDateSimple:', error);
+    return 'Lỗi định dạng ngày';
+  }
+};
+
+// Function to open Google Maps
+const openGoogleMaps = async (address) => {
+  try {
+    // Encode the address for URL
+    const encodedAddress = encodeURIComponent(address);
+    
+    // Create Google Maps URL
+    const googleMapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodedAddress}`;
+    
+    // Check if Google Maps app is available
+    const canOpenGoogleMaps = await Linking.canOpenURL('comgooglemaps://');
+    
+    if (canOpenGoogleMaps) {
+      // Open in Google Maps app
+      const googleMapsAppUrl = `comgooglemaps://?q=${encodedAddress}`;
+      await Linking.openURL(googleMapsAppUrl);
+    } else {
+      // Open in browser
+      await Linking.openURL(googleMapsUrl);
+    }
+  } catch (error) {
+    console.error('Error opening Google Maps:', error);
+    Alert.alert('Lỗi', 'Không thể mở Google Maps. Vui lòng thử lại.');
   }
 };
 
@@ -209,17 +288,35 @@ const AmountCard = ({ expense, fadeAnim, translateY }) => (
 
 // Component for Info Row
 const InfoRow = ({ icon, label, value, color = '#4CAF50', isLink = false, onPress }) => (
-  <>
-    <View style={styles.infoRow}>
-      <View style={styles.infoIconContainer}>
-        {icon}
-      </View>
-      <View style={styles.infoContent}>
-        <Text style={styles.infoLabel}>{label}</Text>
-        <Text style={styles.infoValue}>{value}</Text>
+  <TouchableOpacity 
+    style={styles.infoRow}
+    onPress={onPress}
+    disabled={!onPress}
+    activeOpacity={onPress ? 0.7 : 1}
+  >
+    <View style={styles.infoIconContainer}>
+      {icon}
+    </View>
+    <View style={styles.infoContent}>
+      <Text style={styles.infoLabel}>{label}</Text>
+      <View style={styles.infoValueContainer}>
+        <Text style={[
+          styles.infoValue, 
+          isLink && styles.linkText
+        ]}>
+          {value}
+        </Text>
+        {isLink && (
+          <Ionicons 
+            name="open-outline" 
+            size={16} 
+            color="#4285F4" 
+            style={styles.linkIcon}
+          />
+        )}
       </View>
     </View>
-  </>
+  </TouchableOpacity>
 );
 
 // Component for Delete Modal
@@ -473,6 +570,21 @@ Danh mục: ${typeof expense.category === 'string' ? expense.category : expense.
     }
   }, [expenseId, navigation]);
 
+  // Handle location press
+  const handleLocationPress = useCallback(async (address) => {
+    if (!address || typeof address !== 'string') {
+      Alert.alert('Thông báo', 'Không có thông tin địa điểm hợp lệ');
+      return;
+    }
+
+    try {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      await openGoogleMaps(address);
+    } catch (error) {
+      console.error('Error handling location press:', error);
+    }
+  }, []);
+
   useEffect(() => {
     fetchExpenseDetail();
     
@@ -577,7 +689,7 @@ Danh mục: ${typeof expense.category === 'string' ? expense.category : expense.
             onPress={null}
           />
           
-          {/* Location (if available) */}
+          {/* Location (if available) - Now clickable */}
           {expense.address && (
             <>
               <View style={styles.divider} />
@@ -585,7 +697,8 @@ Danh mục: ${typeof expense.category === 'string' ? expense.category : expense.
                 icon={<Ionicons name="location-outline" size={24} color="#4CAF50" />}
                 label="Địa điểm"
                 value={typeof expense.address === 'string' ? expense.address : 'Không có thông tin'}
-                onPress={null}
+                isLink={true}
+                onPress={() => handleLocationPress(expense.address)}
               />
             </>
           )}
@@ -741,6 +854,13 @@ const styles = StyleSheet.create({
     width: 36,
     marginRight: 12,
     alignItems: 'center',
+  },
+    infoValueContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+    linkIcon: {
+    marginLeft: 8,
   },
   infoContent: {
     flex: 1,
